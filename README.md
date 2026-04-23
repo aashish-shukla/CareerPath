@@ -138,5 +138,5 @@ npm run dev
 ```
 
 ---
-*Created by [PriyanshK09](https://github.com/PriyanshK09)*
+*Created by [Priyansh & Aashish](https://github.com/aashish-shukla)*
 
