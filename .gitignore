@@ -1,0 +1,17 @@
+node_modules
+.DS_Store
+dist
+build
+# .env files contain secrets — never commit them
+.env
+.env.local
+.env.*.local
+!.env.example
+
+backend/logs
+backend/coverage
+
+ml-service/.venv
+ml-service/__pycache__
+ml-service/.pytest_cache
+
