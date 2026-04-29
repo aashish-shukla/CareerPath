@@ -4,9 +4,11 @@ dist
 build
 # .env files contain secrets — never commit them
 .env
-.env.local
-.env.*.local
+.env.*
+**/.env
+**/.env.*
 !.env.example
+!**/.env.example
 
 backend/logs
 backend/coverage

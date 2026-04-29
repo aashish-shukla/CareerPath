@@ -26,7 +26,7 @@ async function generateOllamaResponse({ systemInstruction, prompt }) {
     logger.info(`[Ollama] Received JSON response (${text.length} chars)`);
     try {
         return JSON.parse(text);
-    } catch (e) {
+    } catch (_e) {
         logger.warn("[Ollama] JSON parse failed, attempting regex match");
         // Fallback if the model didn't strictly follow JSON format despite the flag
         const jsonMatch = text.match(/\{[\s\S]*\}/);

@@ -63,7 +63,6 @@ function emptyParsedResume() {
 function buildFallbackRecommendations(profile) {
   const skills = new Set(profile?.skills ?? []);
   const skillsCount = skills.size;
-  const hasExperience = !!(profile?.experience?.summary);
   const expYears = profile?.experience?.years ?? 0;
   
   const scored = careers.map((c) => {
@@ -293,7 +292,7 @@ async function extractResumeText(file) {
 
 function basicRegexExtract(text) {
   const emailMatch = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
-  const phoneMatch = text.match(/[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}/);
+  const phoneMatch = text.match(/[+]?[(]?[0-9]{3}[)]?[-\s.]?[0-9]{3}[-\s.]?[0-9]{4,6}/);
   return {
     email: emailMatch ? emailMatch[0] : "",
     phone: phoneMatch ? phoneMatch[0] : "",
