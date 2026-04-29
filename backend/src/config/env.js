@@ -25,4 +25,7 @@ export const env = Object.freeze({
   // Google Gemini API (primary AI provider when configured)
   GEMINI_API_KEY: process.env.GEMINI_API_KEY ?? "",
   GEMINI_MODEL: process.env.GEMINI_MODEL ?? "gemini-2.0-flash",
+
+  // JSearch API for live job listings (free tier: 200 req/month)
+  JSEARCH_API_KEY: process.env.JSEARCH_API_KEY ?? "",
 });

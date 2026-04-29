@@ -25,18 +25,21 @@ export function DashboardPage() {
   const [rec, setRec] = useState(null);
   const [market, setMarket] = useState(null);
   const [profile, setProfile] = useState(null);
+  const [peerStats, setPeerStats] = useState(null);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const [r1, r2, r3] = await Promise.all([
+      const [r1, r2, r3, r4] = await Promise.all([
         http.get("/api/recommendations/me").catch(() => ({ data: null })),
         http.get("/api/market-insights").catch(() => ({ data: null })),
         http.get("/api/profile/me").catch(() => ({ data: { profile: null } })),
+        http.get("/api/peer-stats").catch(() => ({ data: null })),
       ]);
       setRec(r1.data);
       setMarket(r2.data?.marketInsights ?? null);
       setProfile(r3.data?.profile ?? null);
+      setPeerStats(r4.data);
       
       // Debug log for ATS score
       console.log("[Dashboard] ATS Score received:", r1.data?.atsScore);
@@ -247,10 +250,154 @@ export function DashboardPage() {
                   </div>
                 </CardContent>
               </Card>
+
+              {/* Quick Actions */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {[
+                  { to: "/app/jobs", label: "Browse Jobs", icon: "lucide:briefcase", color: "indigo" },
+                  { to: "/app/resources", label: "Learn Skills", icon: "lucide:book-open", color: "emerald" },
+                  { to: "/app/ats-checker", label: "Scan Resume", icon: "lucide:file-check", color: "amber" },
+                  { to: "/app/chat", label: "AI Copilot", icon: "lucide:sparkles", color: "violet" },
+                ].map((action, i) => (
+                  <Link key={i} to={action.to}>
+                    <div className={cn(
+                      "p-5 rounded-2xl border transition-all hover:-translate-y-1 hover:shadow-lg cursor-pointer group text-center",
+                      "bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800"
+                    )}>
+                      <div className={cn(
+                        "h-10 w-10 rounded-xl flex items-center justify-center mx-auto mb-3 transition-transform group-hover:scale-110",
+                        action.color === "indigo" ? "bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600" :
+                        action.color === "emerald" ? "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600" :
+                        action.color === "amber" ? "bg-amber-50 dark:bg-amber-500/10 text-amber-600" :
+                        "bg-violet-50 dark:bg-violet-500/10 text-violet-600"
+                      )}>
+                        <Icon icon={action.icon} className="h-5 w-5" />
+                      </div>
+                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">{action.label}</span>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+
+              {/* Top Career Matches */}
+              {rec?.recommendations?.length > 0 && (
+                <Card className="rounded-[32px] border-slate-100 dark:border-slate-800 shadow-sm dark:shadow-none bg-white dark:bg-slate-900">
+                  <CardHeader className="border-b border-slate-50 dark:border-slate-800 px-8 py-6">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-base font-black text-slate-950 dark:text-white uppercase italic tracking-tight">Top Career Matches</h3>
+                        <p className="mt-1 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">AI Confidence Scores</p>
+                      </div>
+                      <Link to="/app/recommendations">
+                        <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest hover:underline cursor-pointer">View All →</span>
+                      </Link>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="px-8 py-6">
+                    <div className="space-y-4">
+                      {rec.recommendations.slice(0, 4).map((r, i) => {
+                        const pct = Math.round((r.confidence ?? 0) * 100);
+                        return (
+                          <div key={i} className="flex items-center gap-4 p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-800/30 border border-slate-100 dark:border-slate-800 hover:border-indigo-100 dark:hover:border-indigo-500/30 transition-all">
+                            <div className={cn(
+                              "h-10 w-10 rounded-xl flex items-center justify-center shrink-0 text-sm font-black",
+                              i === 0 ? "bg-indigo-600 text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-500"
+                            )}>
+                              #{i + 1}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-black text-slate-950 dark:text-white tracking-tight truncate">{r.career_title}</div>
+                              <div className="h-1.5 mt-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                <div className={cn("h-full rounded-full", i === 0 ? "bg-indigo-600" : "bg-slate-300 dark:bg-slate-600")} style={{ width: `${pct}%` }} />
+                              </div>
+                            </div>
+                            <span className={cn(
+                              "text-lg font-black tracking-tighter shrink-0",
+                              i === 0 ? "text-indigo-600" : "text-slate-400"
+                            )}>{pct}%</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Skill Cloud */}
+              {skillCount > 0 && (
+                <Card className="rounded-[32px] border-slate-100 dark:border-slate-800 shadow-sm dark:shadow-none bg-white dark:bg-slate-900">
+                  <CardHeader className="border-b border-slate-50 dark:border-slate-800 px-8 py-6">
+                    <h3 className="text-base font-black text-slate-950 dark:text-white uppercase italic tracking-tight">Your Skill Arsenal</h3>
+                    <p className="mt-1 text-[10px] font-bold text-slate-400 uppercase tracking-widest">{skillCount} verified skills</p>
+                  </CardHeader>
+                  <CardContent className="px-8 py-6">
+                    <div className="flex flex-wrap gap-2.5">
+                      {(profile?.skills ?? []).map((skill, i) => {
+                        const isStrength = (rec?.skillGap?.strengths ?? []).some(s => s.toLowerCase() === skill.toLowerCase());
+                        const isMissing = (rec?.skillGap?.missing ?? []).some(m => m.skill?.toLowerCase() === skill.toLowerCase());
+                        return (
+                          <span key={i} className={cn(
+                            "px-3.5 py-1.5 rounded-xl text-xs font-bold border transition-all hover:scale-105",
+                            isMissing ? "bg-rose-50 dark:bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-100 dark:border-rose-500/20" :
+                            isStrength || i < 5 ? "bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border-indigo-100 dark:border-indigo-500/20" :
+                            "bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-100 dark:border-slate-700"
+                          )}>
+                            {skill}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
             </div>
 
             {/* Sidebar Stats column */}
             <div className="space-y-8">
+              {/* Profile Completeness */}
+              {(() => {
+                const checks = [
+                  { label: "Resume uploaded", done: !!profile?.resume?.extractedText },
+                  { label: "Skills added", done: skillCount > 0 },
+                  { label: "Target role set", done: !!(profile?.targetRole) },
+                  { label: "Experience added", done: expYears > 0 },
+                  { label: "Education filled", done: !!(profile?.education?.institution) },
+                ];
+                const done = checks.filter(c => c.done).length;
+                const pct = Math.round((done / checks.length) * 100);
+                return (
+                  <Card className="rounded-[32px] border-slate-100 dark:border-slate-800 shadow-sm bg-white dark:bg-slate-900 overflow-hidden">
+                    <div className={cn("h-1.5", pct === 100 ? "bg-emerald-500" : "bg-indigo-600")} style={{ width: `${pct}%`, transition: "width 1s" }} />
+                    <CardContent className="px-8 py-7">
+                      <div className="flex items-center justify-between mb-5">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Profile Strength</span>
+                        <span className={cn("text-lg font-black tracking-tighter", pct === 100 ? "text-emerald-600" : "text-indigo-600")}>{pct}%</span>
+                      </div>
+                      <div className="space-y-2.5">
+                        {checks.map((c, i) => (
+                          <div key={i} className="flex items-center gap-3">
+                            <div className={cn(
+                              "h-5 w-5 rounded-md flex items-center justify-center text-white",
+                              c.done ? "bg-emerald-500" : "bg-slate-200 dark:bg-slate-700"
+                            )}>
+                              {c.done && <Icon icon="lucide:check" className="h-3 w-3" />}
+                            </div>
+                            <span className={cn("text-xs font-bold", c.done ? "text-slate-600 dark:text-slate-400" : "text-slate-400 dark:text-slate-600")}>{c.label}</span>
+                          </div>
+                        ))}
+                      </div>
+                      {pct < 100 && (
+                        <Link to="/app/profile">
+                          <Button className="w-full mt-5 h-10 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black uppercase tracking-widest">
+                            Complete Profile
+                          </Button>
+                        </Link>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })()}
+
               {[
                 {
                   l: "Job Readiness",
@@ -346,6 +493,69 @@ export function DashboardPage() {
                   </div>
                 </CardContent>
               </Card>
+
+              {/* Peer Comparison */}
+              {peerStats && peerStats.totalUsers > 0 && (
+                <Card className="rounded-[40px] border-slate-100 dark:border-slate-800 shadow-sm dark:shadow-none transition-all hover:shadow-md dark:hover:shadow-indigo-500/10 bg-white dark:bg-slate-900">
+                  <CardHeader className="border-b border-slate-50 dark:border-slate-800 px-8 py-8 flex flex-row items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-black text-slate-950 dark:text-white uppercase italic tracking-tight leading-none">Peer Ranking</h3>
+                      <p className="mt-1.5 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest leading-none">vs {peerStats.totalUsers} users</p>
+                    </div>
+                    <div className="h-10 w-10 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 flex items-center justify-center">
+                      <Icon icon="lucide:users" className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+                    </div>
+                  </CardHeader>
+                  <CardContent className="px-8 py-8">
+                    {/* Overall percentile */}
+                    {peerStats.percentiles?.overall !== null && (
+                      <div className="text-center mb-8">
+                        <div className="relative inline-flex items-center justify-center">
+                          <svg className="h-28 w-28 -rotate-90" viewBox="0 0 36 36">
+                            <circle cx="18" cy="18" r="15.5" fill="none" stroke="currentColor" className="text-slate-100 dark:text-slate-800" strokeWidth="3" />
+                            <circle cx="18" cy="18" r="15.5" fill="none" stroke="currentColor" className="text-indigo-600 dark:text-indigo-400" strokeWidth="3" strokeDasharray={`${peerStats.percentiles.overall * 0.97} 97`} strokeLinecap="round" />
+                          </svg>
+                          <div className="absolute inset-0 flex flex-col items-center justify-center">
+                            <span className="text-2xl font-black text-slate-950 dark:text-white tracking-tighter">Top {Math.max(1, 100 - peerStats.percentiles.overall)}%</span>
+                          </div>
+                        </div>
+                        <p className="mt-3 text-[9px] font-black uppercase tracking-widest text-slate-400">Overall Ranking</p>
+                      </div>
+                    )}
+
+                    <div className="space-y-4">
+                      {[
+                        { label: "Skills", value: peerStats.percentiles?.skills, you: peerStats.you?.skillCount, avg: peerStats.averages?.skillCount, unit: "skills" },
+                        { label: "Experience", value: peerStats.percentiles?.experience, you: peerStats.you?.experience, avg: peerStats.averages?.experience, unit: "yrs" },
+                        { label: "ATS Score", value: peerStats.percentiles?.atsScore, you: peerStats.you?.atsScore, avg: peerStats.averages?.atsScore, unit: "pts" },
+                        { label: "Readiness", value: peerStats.percentiles?.readiness, you: peerStats.you?.readiness, avg: peerStats.averages?.readiness, unit: "%" },
+                      ].filter((s) => s.value !== null && s.value !== undefined).map((stat, i) => (
+                        <div key={i} className="p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-800/30 border border-slate-100 dark:border-slate-800">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{stat.label}</span>
+                            <span className={cn(
+                              "text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded",
+                              stat.value >= 70 ? "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600" :
+                              stat.value >= 40 ? "bg-amber-50 dark:bg-amber-500/10 text-amber-600" :
+                              "bg-rose-50 dark:bg-rose-500/10 text-rose-600"
+                            )}>Top {Math.max(1, 100 - stat.value)}%</span>
+                          </div>
+                          <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                            <div className={cn(
+                              "h-full rounded-full transition-all duration-700",
+                              stat.value >= 70 ? "bg-emerald-500" : stat.value >= 40 ? "bg-amber-500" : "bg-rose-500"
+                            )} style={{ width: `${stat.value}%` }} />
+                          </div>
+                          <div className="flex justify-between mt-2">
+                            <span className="text-[9px] font-bold text-slate-500">You: {stat.you ?? "—"} {stat.unit}</span>
+                            <span className="text-[9px] font-bold text-slate-400">Avg: {stat.avg ?? "—"} {stat.unit}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
             </div>
           </div>
         </>

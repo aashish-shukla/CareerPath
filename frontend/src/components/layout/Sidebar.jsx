@@ -12,6 +12,7 @@ const navItems = [
   { to: "/app/chat", label: "AI Copilot", icon: "lucide:sparkles" },
   { to: "/app/skill-gap", label: "Skill Gap", icon: "lucide:target" },
   { to: "/app/resources", label: "Resources", icon: "lucide:book-open" },
+  { to: "/app/jobs", label: "Jobs", icon: "lucide:briefcase" },
   { to: "/app/profile", label: "Profile", icon: "lucide:user" },
 ];
 

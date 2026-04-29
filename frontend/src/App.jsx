@@ -12,6 +12,7 @@ import { ResourcesPage } from "./pages/app/ResourcesPage";
 import ProfilePage from "./pages/app/ProfilePage";
 import ChatPage from "./pages/app/ChatPage";
 import AtsCheckerPage from "./pages/app/AtsCheckerPage";
+import { JobsPage } from "./pages/app/JobsPage";
 
 function RequireAuth({ children }) {
   const location = useLocation();
@@ -99,6 +100,15 @@ export default function App() {
         element={
           <RequireAuth>
             <AtsCheckerPage />
+          </RequireAuth>
+        }
+      />
+
+      <Route
+        path="/app/jobs"
+        element={
+          <RequireAuth>
+            <JobsPage />
           </RequireAuth>
         }
       />

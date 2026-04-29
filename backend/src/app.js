@@ -15,6 +15,8 @@ import { marketInsightsRoutes } from "./routes/marketInsights.routes.js";
 import { skillsRoutes } from "./routes/skills.routes.js";
 import { resourcesRoutes } from "./routes/resources.routes.js";
 import { chatRoutes } from "./routes/chat.routes.js";
+import { jobsRoutes } from "./routes/jobs.routes.js";
+import { peerStatsRoutes } from "./routes/peerStats.routes.js";
 
 export function createApp() {
   const app = express();
@@ -49,6 +51,8 @@ export function createApp() {
   app.use("/api/market-insights", marketInsightsRoutes);
   app.use("/api/resources", resourcesRoutes);
   app.use("/api/chat", chatRoutes);
+  app.use("/api/jobs", jobsRoutes);
+  app.use("/api/peer-stats", peerStatsRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
