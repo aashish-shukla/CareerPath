@@ -72,5 +72,10 @@ const profileSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Indexes for peer stats aggregation and seed cleanup
+profileSchema.index({ targetRole: 1 });
+profileSchema.index({ "experience.years": 1 });
+profileSchema.index({ _isSeedData: 1 }, { sparse: true });
+
 export const Profile = mongoose.model("Profile", profileSchema);
 

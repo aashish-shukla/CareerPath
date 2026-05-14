@@ -63,34 +63,73 @@ function emptyParsedResume() {
 function buildFallbackRecommendations(profile) {
   const skills = new Set(profile?.skills ?? []);
   const skillsCount = skills.size;
-  const expYears = profile?.experience?.years ?? 0;
+  const resumeParsed = profile?.resume?.parsed ?? profile?.resume?.details ?? {};
+  
+  // Use resume-parsed experience if profile experience is 0
+  let expYears = profile?.experience?.years ?? 0;
+  if (expYears === 0 && resumeParsed?.totalYearsExperience > 0) {
+    expYears = resumeParsed.totalYearsExperience;
+  }
+  
+  // Gather deep-parsed data for matching
+  const parsedCertifications = (Array.isArray(resumeParsed?.certifications) ? resumeParsed.certifications : [])
+    .map(c => c.toLowerCase());
+  const parsedProjects = Array.isArray(resumeParsed?.projects) ? resumeParsed.projects : [];
+  const projectTechSet = new Set(parsedProjects.flatMap(p => (p.technologies ?? []).map(t => t.toLowerCase())));
+  const parsedExperience = Array.isArray(resumeParsed?.experience) ? resumeParsed.experience : [];
+  const jobTitles = parsedExperience.map(e => (e.title ?? "").toLowerCase());
   
   const scored = careers.map((c) => {
     const overlap = c.topSkills.filter((s) => skills.has(s)).length;
     let confidence = c.topSkills.length ? overlap / c.topSkills.length : 0.05;
     
     // Penalize lack of experience for senior roles
-    if (c.title.toLowerCase().includes('senior') && expYears < 3) {
-      confidence *= 0.6;
-    }
-    if (c.title.toLowerCase().includes('lead') && expYears < 5) {
-      confidence *= 0.5;
-    }
+    if (c.title.toLowerCase().includes('senior') && expYears < 3) confidence *= 0.6;
+    if (c.title.toLowerCase().includes('lead') && expYears < 5) confidence *= 0.5;
     
     // Boost for good skill coverage
-    if (skillsCount >= 8 && overlap >= 5) {
-      confidence *= 1.15;
-    }
+    if (skillsCount >= 8 && overlap >= 5) confidence *= 1.15;
+    
+    // NEW: Certification relevance boost
+    const careerLower = c.title.toLowerCase();
+    const certBoost = parsedCertifications.some(cert => {
+      if (careerLower.includes('cloud') && (cert.includes('aws') || cert.includes('gcp') || cert.includes('azure'))) return true;
+      if (careerLower.includes('data') && (cert.includes('data') || cert.includes('analytics'))) return true;
+      if (careerLower.includes('security') && (cert.includes('security') || cert.includes('oscp') || cert.includes('ceh'))) return true;
+      if (careerLower.includes('devops') && (cert.includes('docker') || cert.includes('kubernetes') || cert.includes('terraform'))) return true;
+      if (careerLower.includes('ml') && (cert.includes('machine learning') || cert.includes('tensorflow'))) return true;
+      return false;
+    });
+    if (certBoost) confidence *= 1.12;
+    
+    // NEW: Project technology overlap boost
+    const projectOverlap = c.topSkills.filter(s => projectTechSet.has(s.toLowerCase())).length;
+    if (projectOverlap >= 3) confidence *= 1.10;
+    else if (projectOverlap >= 1) confidence *= 1.05;
+    
+    // NEW: Job title alignment boost
+    const titleMatch = jobTitles.some(title => {
+      const careerWords = careerLower.split(/\s+/);
+      return careerWords.some(w => w.length > 3 && title.includes(w));
+    });
+    if (titleMatch) confidence *= 1.15;
     
     // Cap between realistic bounds
     confidence = Math.max(0.15, Math.min(0.85, confidence));
     
+    // Build detailed reason
+    const reasons = [];
+    if (overlap > 0) reasons.push(`${overlap}/${c.topSkills.length} skills match`);
+    if (certBoost) reasons.push("relevant certifications");
+    if (projectOverlap > 0) reasons.push(`${projectOverlap} project tech overlap`);
+    if (titleMatch) reasons.push("related work history");
+    
     return {
       career_id: c.id,
       career_title: c.title,
-      confidence: Math.round(confidence * 100) / 100, // Round to 2 decimals
-      reason: overlap > 0
-        ? `Matches ${overlap} of ${c.topSkills.length} key skills (${Math.round(confidence * 100)}% fit).`
+      confidence: Math.round(confidence * 100) / 100,
+      reason: reasons.length > 0
+        ? `${Math.round(confidence * 100)}% fit — ${reasons.join(", ")}.`
         : "Emerging opportunity - consider upskilling.",
     };
   });
@@ -161,90 +200,123 @@ function buildFallbackAtsScore(profile, targetRole) {
   const hasResume = !!(profile?.resume?.extractedText);
   const resumeText = profile?.resume?.extractedText ?? "";
   const resumeLength = resumeText.length;
+  const resumeParsed = profile?.resume?.parsed ?? profile?.resume?.details ?? {};
   
   // Merge skills from profile AND resume parsed data
   const profileSkills = profile?.skills ?? [];
-  const resumeSkills = profile?.resume?.parsed?.skills ?? profile?.resume?.details?.skills ?? [];
+  const resumeSkills = resumeParsed?.skills ?? [];
   const allSkills = [...new Set([...profileSkills, ...resumeSkills])];
   const skillsCount = allSkills.length;
   
   const hasEducation = !!(profile?.education?.institution);
   
-  // Use whichever experience source has more data
+  // Deep-parsed data
+  const parsedExperience = Array.isArray(resumeParsed?.experience) ? resumeParsed.experience : [];
+  const parsedEducation = Array.isArray(resumeParsed?.education) ? resumeParsed.education : [];
+  const parsedCertifications = Array.isArray(resumeParsed?.certifications) ? resumeParsed.certifications : [];
+  const parsedProjects = Array.isArray(resumeParsed?.projects) ? resumeParsed.projects : [];
+  const parsedLinks = Array.isArray(resumeParsed?.links) ? resumeParsed.links : [];
+  const parsedKeywords = Array.isArray(resumeParsed?.keywords) ? resumeParsed.keywords : [];
+  
+  // Experience detection (profile + resume)
   const profileExpYears = profile?.experience?.years ?? 0;
   const hasProfileExperience = !!(profile?.experience?.summary);
-  
-  // Try to detect experience from resume text if profile has 0 years
   let expYears = profileExpYears;
   let hasExperience = hasProfileExperience;
+  
+  // Use resume-parsed totalYearsExperience if profile has 0
+  if (expYears === 0 && resumeParsed?.totalYearsExperience > 0) {
+    expYears = resumeParsed.totalYearsExperience;
+    hasExperience = true;
+  }
+  
   if (expYears === 0 && resumeText) {
-    // Look for experience indicators in resume text
     const yearMatch = resumeText.match(/(\d+)\+?\s*years?\s*(of)?\s*(experience|expertise)/i);
-    if (yearMatch) {
-      expYears = parseInt(yearMatch[1], 10);
-    }
-    // Check for job titles with dates as experience evidence
+    if (yearMatch) expYears = parseInt(yearMatch[1], 10);
     const jobDates = resumeText.match(/\d{4}\s*[-–]\s*(Present|\d{4})/gi);
     if (jobDates && jobDates.length > 0) {
       hasExperience = true;
-      if (expYears === 0) {
-        // Estimate from date ranges
-        expYears = Math.min(jobDates.length * 1.5, 10);
-      }
+      if (expYears === 0) expYears = Math.min(jobDates.length * 1.5, 10);
     }
   }
   
-  // Also count resume-specific quality indicators
   const hasQuantifiedAchievements = /\d+%|\d+\+|increased|reduced|improved|built|led|managed/i.test(resumeText);
-  const hasCertifications = /certif/i.test(resumeText);
-  const hasProjects = /project/i.test(resumeText);
   
-  // More realistic, granular scoring
+  // ── Scoring (total: 0-100) ──
   let score = 0;
   
-  // Resume Quality (0-35 points)
+  // Resume Quality (0-25 pts)
   if (hasResume) {
-    if (resumeLength < 300) score += 10; // Too short
-    else if (resumeLength < 800) score += 18; // Minimal
-    else if (resumeLength < 1500) score += 25; // Good
-    else if (resumeLength < 3000) score += 32; // Excellent
-    else score += 15; // Too long
+    if (resumeLength < 300) score += 8;
+    else if (resumeLength < 800) score += 14;
+    else if (resumeLength < 1500) score += 20;
+    else if (resumeLength < 3000) score += 25;
+    else score += 12; // Too long
   }
   
-  // Skills Match (0-30 points)
+  // Skills Match (0-20 pts)
   if (skillsCount === 0) score += 0;
-  else if (skillsCount < 3) score += 12;
-  else if (skillsCount < 6) score += 20;
-  else if (skillsCount < 10) score += 28;
-  else score += 30;
+  else if (skillsCount < 3) score += 8;
+  else if (skillsCount < 6) score += 14;
+  else if (skillsCount < 10) score += 18;
+  else score += 20;
   
-  // Experience Quality (0-25 points)
+  // Experience Quality (0-18 pts)
   if (hasExperience) {
-    const summaryLength = profile?.experience?.summary?.length ?? 0;
-    if (expYears === 0 && summaryLength < 100) score += 8;
-    else if (expYears < 2) score += 15;
-    else if (expYears < 5) score += 20;
-    else score += 25;
+    if (expYears === 0) score += 5;
+    else if (expYears < 2) score += 10;
+    else if (expYears < 5) score += 14;
+    else score += 18;
   }
   
-  // Education (0-10 points)
-  if (hasEducation) score += 10;
+  // Work History Detail (0-10 pts) — NEW: structured experience entries with highlights
+  const highlightCount = parsedExperience.reduce((acc, e) => acc + (e.highlights?.length ?? 0), 0);
+  if (parsedExperience.length >= 3 && highlightCount >= 5) score += 10;
+  else if (parsedExperience.length >= 2 && highlightCount >= 3) score += 7;
+  else if (parsedExperience.length >= 1) score += 4;
   
-  // Bonus points for quality indicators (0-5 points)
-  if (hasQuantifiedAchievements) score += 2;
-  if (hasCertifications) score += 2;
-  if (hasProjects) score += 1;
+  // Education (0-7 pts)
+  if (hasEducation || parsedEducation.length > 0) {
+    score += parsedEducation.some(e => e.gpa) ? 7 : 5;
+  }
   
-  // Calculate breakdown percentages
-  const keywordMatch = Math.min(100, (skillsCount / 12) * 100);
+  // Certifications (0-5 pts) — NEW
+  if (parsedCertifications.length >= 3) score += 5;
+  else if (parsedCertifications.length >= 1) score += 3;
+  
+  // Projects (0-5 pts) — NEW
+  const projectsWithTech = parsedProjects.filter(p => p.technologies?.length > 0);
+  if (projectsWithTech.length >= 3) score += 5;
+  else if (projectsWithTech.length >= 1) score += 3;
+  else if (parsedProjects.length >= 1) score += 2;
+  
+  // Portfolio/Links (0-3 pts) — NEW
+  const hasLinkedIn = parsedLinks.some(l => /linkedin/i.test(l));
+  const hasGitHub = parsedLinks.some(l => /github/i.test(l));
+  if (hasLinkedIn && hasGitHub) score += 3;
+  else if (hasLinkedIn || hasGitHub) score += 2;
+  else if (parsedLinks.length > 0) score += 1;
+  
+  // Quantified achievements bonus (0-3 pts)
+  if (hasQuantifiedAchievements) score += 3;
+  
+  // Action verbs bonus (0-2 pts)
+  const actionVerbs = /\b(architected|spearheaded|optimized|implemented|developed|engineered|designed|deployed|automated|mentored)\b/i;
+  if (actionVerbs.test(resumeText)) score += 2;
+  
+  // Keyword match — use parsed keywords + skills for density calc
+  const totalKeywords = allSkills.length + parsedKeywords.length;
+  const keywordMatch = Math.min(100, (totalKeywords / 15) * 100);
   const impactScore = hasExperience 
-    ? Math.min(100, Math.max((expYears / 8) * 100, hasQuantifiedAchievements ? 40 : 10))
+    ? Math.min(100, Math.max((expYears / 8) * 100, hasQuantifiedAchievements ? 50 : 10, (highlightCount / 8) * 100))
     : 0;
   const formattingScore = hasResume ? (resumeLength > 800 && resumeLength < 2500 ? 85 : 55) : 15;
   const brevityScore = resumeLength > 1000 && resumeLength < 2200 ? 95 : (resumeLength > 300 ? 60 : 35);
-  const completenessScore = (hasResume ? 25 : 0) + (skillsCount > 0 ? 25 : 0) + (hasExperience ? 25 : 0) + (hasEducation ? 25 : 0);
+  const completenessScore = (hasResume ? 20 : 0) + (skillsCount > 0 ? 20 : 0) + (hasExperience ? 20 : 0) 
+    + (hasEducation || parsedEducation.length > 0 ? 15 : 0) + (parsedCertifications.length > 0 ? 10 : 0)
+    + (parsedProjects.length > 0 ? 10 : 0) + (parsedLinks.length > 0 ? 5 : 0);
   
-  // Generate realistic feedback
+  // Generate feedback
   const strengths = [];
   const improvements = [];
   const keywordGaps = [];
@@ -254,16 +326,24 @@ function buildFallbackAtsScore(profile, targetRole) {
   if (expYears >= 3) strengths.push("Solid experience level");
   if (hasEducation) strengths.push("Education background documented");
   if (hasQuantifiedAchievements) strengths.push("Quantified impact metrics");
-  if (hasCertifications) strengths.push("Professional certifications included");
+  if (parsedCertifications.length > 0) strengths.push(`${parsedCertifications.length} professional certification(s)`);
+  if (parsedProjects.length > 0) strengths.push(`${parsedProjects.length} project(s) documented`);
+  if (hasLinkedIn || hasGitHub) strengths.push("Professional links included");
+  if (parsedExperience.length >= 2) strengths.push(`${parsedExperience.length} work history entries`);
   
   if (resumeLength < 800) improvements.push("Expand resume details");
   if (skillsCount < 6) improvements.push("Add more technical skills");
   if (!hasExperience || expYears < 2) improvements.push("Highlight more achievements");
-  if (!hasEducation) improvements.push("Include education history");
+  if (!hasEducation && parsedEducation.length === 0) improvements.push("Include education history");
   if (!hasQuantifiedAchievements) improvements.push("Add quantified achievements (e.g., 'increased X by 30%')");
+  if (parsedCertifications.length === 0) improvements.push("Add professional certifications");
+  if (parsedProjects.length === 0) improvements.push("Showcase technical projects");
+  if (!hasLinkedIn) improvements.push("Add LinkedIn profile link");
+  if (highlightCount < 3) improvements.push("Add bullet-point achievements to each job");
   
   keywordGaps.push(`Target role: ${targetRole}`);
   if (skillsCount < 8) keywordGaps.push("Consider adding domain-specific keywords");
+  if (parsedKeywords.length < 5) keywordGaps.push("Resume lacks industry buzzwords");
   
   return {
     score: Math.max(15, Math.min(100, Math.round(score))),
@@ -272,7 +352,7 @@ function buildFallbackAtsScore(profile, targetRole) {
       impact: Math.round(impactScore),
       formatting: Math.round(formattingScore),
       brevity: Math.round(brevityScore),
-      sectionCompleteness: Math.round(completenessScore),
+      sectionCompleteness: Math.min(100, Math.round(completenessScore)),
     },
     strengths: strengths.length > 0 ? strengths : ["Profile created"],
     improvements: improvements.length > 0 ? improvements : ["Continue building your profile"],
@@ -331,6 +411,32 @@ export async function uploadResume(req, res, next) {
     const existing = await Profile.findOne({ userId: req.user.sub });
     const mergedSkills = Array.from(new Set([...(parsed.skills ?? []), ...(existing?.skills ?? [])])).filter(Boolean);
 
+    // Auto-populate empty profile fields from deep resume extraction
+    const autoFill = {};
+    if (enrich && parsed) {
+      // Auto-fill experience if user hasn't manually set it
+      if ((!existing?.experience?.years || existing.experience.years === 0) && parsed.totalYearsExperience > 0) {
+        autoFill["experience.years"] = parsed.totalYearsExperience;
+        logger.info(`[Resume AutoFill] Set experience to ${parsed.totalYearsExperience} years`);
+      }
+      if (!existing?.experience?.summary && parsed.summary) {
+        autoFill["experience.summary"] = parsed.summary;
+      }
+      // Auto-fill education from first parsed education entry
+      const firstEdu = Array.isArray(parsed.education) ? parsed.education[0] : null;
+      if (firstEdu && !existing?.education?.institution) {
+        if (firstEdu.institution) autoFill["education.institution"] = firstEdu.institution;
+        if (firstEdu.degree) autoFill["education.field"] = firstEdu.degree;
+        if (firstEdu.graduationYear) autoFill["education.graduationYear"] = firstEdu.graduationYear;
+        logger.info(`[Resume AutoFill] Set education from resume: ${firstEdu.institution}`);
+      }
+      // Auto-fill name if empty
+      if (!existing?.fullName && parsed.name) {
+        autoFill.fullName = parsed.name;
+        logger.info(`[Resume AutoFill] Set fullName: ${parsed.name}`);
+      }
+    }
+
     const profile = await Profile.findOneAndUpdate(
       { userId: req.user.sub },
       {
@@ -342,6 +448,7 @@ export async function uploadResume(req, res, next) {
           "resume.atsScore": null, // Reset ATS score on new upload
           skills: mergedSkills,
           needsRegeneration: true, // Mark for AI regeneration
+          ...autoFill,
         }
       },
       { new: true, upsert: true, setDefaultsOnInsert: true }
@@ -443,6 +550,16 @@ export async function getMyRecommendations(req, res, next) {
       experience: profile.experience,
       resume: resumeParsed,
       profile_summary: profile.profileSummary?.summary ?? "",
+      // Deep-parsed resume enrichments for better AI context
+      certifications: resumeParsed?.certifications ?? [],
+      projects: (resumeParsed?.projects ?? []).map(p => ({
+        name: p.name, technologies: p.technologies, impact: p.impact,
+      })),
+      work_history: (resumeParsed?.experience ?? []).map(e => ({
+        title: e.title, company: e.company, highlights: (e.highlights ?? []).slice(0, 3),
+      })),
+      keywords: resumeParsed?.keywords ?? [],
+      seniority: resumeParsed?.seniorityLevel ?? "",
     };
 
     let warning = "";

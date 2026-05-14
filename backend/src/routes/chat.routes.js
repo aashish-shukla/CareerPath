@@ -2,6 +2,7 @@ import { Router } from "express";
 import Joi from "joi";
 import { requireAuth } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
+import { aiLimiter } from "../middleware/rateLimiter.js";
 import { 
   chatWithCareerCopilot, 
   getChatHistory, 
@@ -16,6 +17,7 @@ chatRoutes.delete("/", requireAuth, clearChatHistory);
 chatRoutes.post(
   "/",
   requireAuth,
+  aiLimiter,
   validate(
     Joi.object({
       message: Joi.string().min(1).max(2000).required(),

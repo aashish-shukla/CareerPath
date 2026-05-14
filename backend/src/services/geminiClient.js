@@ -53,18 +53,86 @@ export async function geminiProfileSummary(profile) {
 
 export async function geminiParseResume({ text }) {
   const systemInstruction =
-    "Resume insight extractor. Extract only top skills and professional bio. Output strictly JSON.";
+    "Expert resume parser. Extract ALL structured data from the resume. Output strictly JSON.";
   const prompt = `
-    Analyze the following resume text and extract ONLY the skill list and a 1-sentence bio.
+    Parse the resume and extract complete structured data.
     Return JSON:
     {
       "name": "Full legal name if found",
-      "summary": "1-sentence professional summary",
-      "skills": ["Array of top 12 technical skills found"]
+      "email": "email if found",
+      "phone": "phone if found",
+      "location": "City, State if found",
+      "links": ["LinkedIn", "GitHub", "portfolio URLs"],
+      "summary": "2-sentence professional summary",
+      "skills": ["up to 20 technical and professional skills"],
+      "experience": [
+        {
+          "title": "Job Title",
+          "company": "Company",
+          "location": "City",
+          "startDate": "YYYY-MM",
+          "endDate": "YYYY-MM or Present",
+          "highlights": ["quantified achievement"]
+        }
+      ],
+      "education": [
+        {
+          "degree": "Degree and Field",
+          "institution": "University",
+          "graduationYear": 2022,
+          "gpa": "GPA if mentioned"
+        }
+      ],
+      "certifications": ["cert names"],
+      "projects": [
+        {
+          "name": "Project",
+          "description": "brief desc",
+          "technologies": ["tech"],
+          "impact": "impact"
+        }
+      ],
+      "keywords": ["domain buzzwords not in skills"],
+      "totalYearsExperience": 3,
+      "seniorityLevel": "Junior|Mid-Level|Senior|Lead"
     }
-    Resume Text (truncated): ${text.slice(0, 3500)}
+    Resume Text (truncated): ${text.slice(0, 4000)}
   `;
-  return generateOllamaResponse({ systemInstruction, prompt });
+  // Use higher token limit for deep extraction
+  try {
+    logger.info(`[Ollama] Deep resume parsing with model: ${env.OLLAMA_MODEL}`);
+    const response = await axios.post(`${env.OLLAMA_BASE_URL}/api/generate`, {
+      model: env.OLLAMA_MODEL,
+      system: systemInstruction,
+      prompt: prompt,
+      stream: false,
+      format: "json",
+      options: {
+        temperature: 0.1,
+        num_predict: 1024, // Higher limit for deep extraction
+      }
+    });
+
+    const responseText = response.data?.response;
+    if (!responseText) {
+      throw new HttpError(500, "Ollama response generation failed");
+    }
+
+    logger.info(`[Ollama] Deep parse received (${responseText.length} chars)`);
+    try {
+      return JSON.parse(responseText);
+    } catch (_e) {
+      logger.warn("[Ollama] JSON parse failed, attempting regex match");
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]);
+      }
+      throw new HttpError(500, "Failed to parse Ollama JSON response");
+    }
+  } catch (err) {
+    logger.error("Ollama deep parse error:", err?.response?.data || err.message);
+    throw new HttpError(err.status || 500, `AI Service Error: ${err.message}`);
+  }
 }
 
 export async function geminiRecommendCareers({ profile, careers }) {

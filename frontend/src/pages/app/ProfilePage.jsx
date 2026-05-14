@@ -20,7 +20,7 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
-  const [activeTab, setActiveTab] = useState("info"); // info, resume
+  const [activeTab, setActiveTab] = useState("info"); // info, resume, intelligence
   const [formKey, setFormKey] = useState(0); // forces form re-mount on profile refresh
   
   // Upload UI states
@@ -119,7 +119,7 @@ export default function ProfilePage() {
           </p>
         </div>
         <div className="flex bg-white dark:bg-slate-900 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-all">
-          {["info", "resume"].map((tab) => (
+          {["info", "resume", "intelligence"].map((tab) => (
             <button
               key={tab}
               onClick={() => {
@@ -127,13 +127,13 @@ export default function ProfilePage() {
                 if (tab !== "resume") resetUpload();
               }}
               className={cn(
-                "px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                "px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
                 activeTab === tab 
                   ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20" 
                   : "text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400"
               )}
             >
-              {tab === "info" ? "General Info" : "Resume"}
+              {tab === "info" ? "General" : tab === "resume" ? "Resume" : "Intelligence"}
             </button>
           ))}
         </div>
@@ -459,6 +459,224 @@ export default function ProfilePage() {
                       </div>
                     )}
                   </Card>
+                </motion.div>
+              )}
+
+              {activeTab === "intelligence" && (
+                <motion.div
+                  key="intelligence"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.3 }}
+                  className="space-y-8"
+                >
+                  {(() => {
+                    const rp = profile?.resume?.parsed ?? profile?.resume?.details ?? null;
+                    if (!rp || (!rp.experience?.length && !rp.education?.length && !rp.certifications?.length && !rp.projects?.length && !rp.keywords?.length)) {
+                      return (
+                        <Card className="rounded-[40px] border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm border overflow-hidden p-16 text-center">
+                          <div className="h-20 w-20 rounded-[28px] bg-slate-50 dark:bg-slate-800 flex items-center justify-center mx-auto mb-6 text-slate-300 dark:text-slate-600">
+                            <Icon icon="lucide:brain" className="h-10 w-10" />
+                          </div>
+                          <h3 className="text-2xl font-black text-slate-950 dark:text-white uppercase italic tracking-tight mb-3">No Intelligence Data</h3>
+                          <p className="text-sm text-slate-500 dark:text-slate-400 max-w-sm mx-auto mb-8 font-medium">Upload a resume in the Resume tab to generate deep AI-extracted intelligence data.</p>
+                          <Button onClick={() => setActiveTab("resume")} className="bg-indigo-600 text-white px-8 h-12 rounded-2xl text-[10px] font-black uppercase tracking-widest">
+                            Upload Resume
+                          </Button>
+                        </Card>
+                      );
+                    }
+
+                    return (
+                      <>
+                        {/* Seniority & Overview */}
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          {[
+                            { l: "Seniority", v: rp.seniorityLevel || "—", icon: "lucide:award", color: "indigo" },
+                            { l: "Experience", v: `${rp.totalYearsExperience ?? 0}y`, icon: "lucide:clock", color: "emerald" },
+                            { l: "Certifications", v: rp.certifications?.length ?? 0, icon: "lucide:badge-check", color: "amber" },
+                            { l: "Projects", v: rp.projects?.length ?? 0, icon: "lucide:folder-kanban", color: "violet" },
+                          ].map((s, i) => (
+                            <div key={i} className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-sm text-center">
+                              <div className={cn(
+                                "h-10 w-10 rounded-xl flex items-center justify-center mx-auto mb-3",
+                                s.color === "indigo" ? "bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600" :
+                                s.color === "emerald" ? "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600" :
+                                s.color === "amber" ? "bg-amber-50 dark:bg-amber-500/10 text-amber-600" :
+                                "bg-violet-50 dark:bg-violet-500/10 text-violet-600"
+                              )}>
+                                <Icon icon={s.icon} className="h-5 w-5" />
+                              </div>
+                              <div className="text-2xl font-black text-slate-950 dark:text-white tracking-tighter">{s.v}</div>
+                              <div className="text-[9px] font-black uppercase tracking-widest text-slate-400 mt-1">{s.l}</div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Work History */}
+                        {rp.experience?.length > 0 && (
+                          <Card className="rounded-[32px] border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm border overflow-hidden">
+                            <CardHeader className="px-8 py-6 border-b border-slate-50 dark:border-slate-800">
+                              <div className="flex items-center gap-3">
+                                <Icon icon="lucide:briefcase" className="h-4 w-4 text-indigo-600" />
+                                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Work History</span>
+                                <Badge tone="indigo" className="ml-auto text-[9px] font-black px-2 py-0.5 rounded-md">{rp.experience.length} ENTRIES</Badge>
+                              </div>
+                            </CardHeader>
+                            <CardContent className="px-8 py-6">
+                              <div className="space-y-6">
+                                {rp.experience.map((job, i) => (
+                                  <div key={i} className="relative pl-8 border-l-2 border-slate-100 dark:border-slate-800 pb-6 last:pb-0">
+                                    <div className="absolute left-[-5px] top-1 h-2.5 w-2.5 rounded-full bg-indigo-600 shadow-[0_0_8px_rgba(99,102,241,0.4)]" />
+                                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-1 mb-2">
+                                      <div className="text-sm font-black text-slate-950 dark:text-white tracking-tight">{job.title}</div>
+                                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{job.startDate} → {job.endDate}</span>
+                                    </div>
+                                    <div className="text-xs font-bold text-indigo-600 dark:text-indigo-400 mb-2">{job.company}{job.location ? ` · ${job.location}` : ""}</div>
+                                    {job.highlights?.length > 0 && (
+                                      <ul className="space-y-1.5">
+                                        {job.highlights.map((h, j) => (
+                                          <li key={j} className="text-xs text-slate-600 dark:text-slate-400 font-medium flex items-start gap-2">
+                                            <span className="text-emerald-500 mt-0.5">•</span>
+                                            {h}
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </CardContent>
+                          </Card>
+                        )}
+
+                        {/* Education */}
+                        {rp.education?.length > 0 && (
+                          <Card className="rounded-[32px] border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm border overflow-hidden">
+                            <CardHeader className="px-8 py-6 border-b border-slate-50 dark:border-slate-800">
+                              <div className="flex items-center gap-3">
+                                <Icon icon="lucide:graduation-cap" className="h-4 w-4 text-emerald-600" />
+                                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Education</span>
+                              </div>
+                            </CardHeader>
+                            <CardContent className="px-8 py-6">
+                              <div className="space-y-4">
+                                {rp.education.map((edu, i) => (
+                                  <div key={i} className="flex items-start gap-4 p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-800/30 border border-slate-100 dark:border-slate-800">
+                                    <div className="h-10 w-10 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 flex items-center justify-center shrink-0">
+                                      <Icon icon="lucide:graduation-cap" className="h-5 w-5" />
+                                    </div>
+                                    <div className="flex-1">
+                                      <div className="text-sm font-black text-slate-950 dark:text-white tracking-tight">{edu.degree}</div>
+                                      <div className="text-xs font-bold text-slate-500 mt-0.5">{edu.institution}{edu.graduationYear ? ` · ${edu.graduationYear}` : ""}</div>
+                                      {edu.gpa && <div className="text-[10px] font-bold text-emerald-600 mt-1">CGPA: {edu.gpa}</div>}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </CardContent>
+                          </Card>
+                        )}
+
+                        {/* Certifications */}
+                        {rp.certifications?.length > 0 && (
+                          <Card className="rounded-[32px] border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm border overflow-hidden">
+                            <CardHeader className="px-8 py-6 border-b border-slate-50 dark:border-slate-800">
+                              <div className="flex items-center gap-3">
+                                <Icon icon="lucide:badge-check" className="h-4 w-4 text-amber-600" />
+                                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Certifications</span>
+                              </div>
+                            </CardHeader>
+                            <CardContent className="px-8 py-6">
+                              <div className="flex flex-wrap gap-3">
+                                {rp.certifications.map((cert, i) => (
+                                  <div key={i} className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-50/50 dark:bg-amber-500/5 border border-amber-100/50 dark:border-amber-500/10 text-xs font-black text-amber-800 dark:text-amber-300 uppercase tracking-wide">
+                                    <Icon icon="lucide:award" className="h-3.5 w-3.5 text-amber-500" />
+                                    {cert}
+                                  </div>
+                                ))}
+                              </div>
+                            </CardContent>
+                          </Card>
+                        )}
+
+                        {/* Projects */}
+                        {rp.projects?.length > 0 && (
+                          <Card className="rounded-[32px] border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm border overflow-hidden">
+                            <CardHeader className="px-8 py-6 border-b border-slate-50 dark:border-slate-800">
+                              <div className="flex items-center gap-3">
+                                <Icon icon="lucide:folder-kanban" className="h-4 w-4 text-violet-600" />
+                                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Projects</span>
+                              </div>
+                            </CardHeader>
+                            <CardContent className="px-8 py-6">
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {rp.projects.map((proj, i) => (
+                                  <div key={i} className="p-5 rounded-2xl bg-slate-50/50 dark:bg-slate-800/30 border border-slate-100 dark:border-slate-800 hover:border-violet-200 dark:hover:border-violet-500/30 transition-all">
+                                    <div className="text-sm font-black text-slate-950 dark:text-white tracking-tight mb-1">{proj.name}</div>
+                                    <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mb-3 leading-relaxed">{proj.description}</p>
+                                    {proj.technologies?.length > 0 && (
+                                      <div className="flex flex-wrap gap-1.5 mb-2">
+                                        {proj.technologies.map((t, j) => (
+                                          <span key={j} className="px-2 py-0.5 rounded-md bg-violet-50 dark:bg-violet-500/10 text-[9px] font-bold text-violet-700 dark:text-violet-400 uppercase">{t}</span>
+                                        ))}
+                                      </div>
+                                    )}
+                                    {proj.impact && <div className="text-[10px] font-bold text-emerald-600 italic">Impact: {proj.impact}</div>}
+                                  </div>
+                                ))}
+                              </div>
+                            </CardContent>
+                          </Card>
+                        )}
+
+                        {/* Keywords */}
+                        {rp.keywords?.length > 0 && (
+                          <Card className="rounded-[32px] border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm border overflow-hidden">
+                            <CardHeader className="px-8 py-6 border-b border-slate-50 dark:border-slate-800">
+                              <div className="flex items-center gap-3">
+                                <Icon icon="lucide:hash" className="h-4 w-4 text-indigo-600" />
+                                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Industry Keywords</span>
+                              </div>
+                            </CardHeader>
+                            <CardContent className="px-8 py-6">
+                              <div className="flex flex-wrap gap-2.5">
+                                {rp.keywords.map((kw, i) => (
+                                  <span key={i} className="px-3.5 py-1.5 rounded-xl text-xs font-bold border border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:border-indigo-200 dark:hover:border-indigo-500/30 transition-all cursor-default flex items-center gap-2">
+                                    <div className="h-1.5 w-1.5 rounded-full bg-indigo-500" />
+                                    {kw}
+                                  </span>
+                                ))}
+                              </div>
+                            </CardContent>
+                          </Card>
+                        )}
+
+                        {/* Links */}
+                        {rp.links?.length > 0 && (
+                          <Card className="rounded-[32px] border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm border overflow-hidden">
+                            <CardHeader className="px-8 py-6 border-b border-slate-50 dark:border-slate-800">
+                              <div className="flex items-center gap-3">
+                                <Icon icon="lucide:link" className="h-4 w-4 text-blue-600" />
+                                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Professional Links</span>
+                              </div>
+                            </CardHeader>
+                            <CardContent className="px-8 py-6">
+                              <div className="space-y-3">
+                                {rp.links.map((link, i) => (
+                                  <a key={i} href={link} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 rounded-xl bg-slate-50/50 dark:bg-slate-800/30 border border-slate-100 dark:border-slate-800 hover:border-blue-200 dark:hover:border-blue-500/30 transition-all group">
+                                    <Icon icon={/linkedin/i.test(link) ? "mdi:linkedin" : /github/i.test(link) ? "mdi:github" : "lucide:external-link"} className="h-4 w-4 text-slate-400 group-hover:text-blue-600 transition-colors" />
+                                    <span className="text-xs font-bold text-slate-600 dark:text-slate-400 truncate group-hover:text-blue-600 transition-colors">{link}</span>
+                                  </a>
+                                ))}
+                              </div>
+                            </CardContent>
+                          </Card>
+                        )}
+                      </>
+                    );
+                  })()}
                 </motion.div>
               )}
             </AnimatePresence>

@@ -5,6 +5,7 @@ import { authStore } from "./state/authStore";
 export const http = axios.create({
   baseURL: env.API_BASE_URL,
   timeout: 120_000, // Increased to 120s for local Ollama inference
+  withCredentials: true, // Send httpOnly cookies with cross-origin requests
 });
 
 http.interceptors.request.use((config) => {

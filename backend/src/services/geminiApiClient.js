@@ -2,53 +2,116 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { env } from "../config/env.js";
 import { logger } from "../utils/logger.js";
 
-let genAI = null;
-let model = null;
+// ── Primary-Failover Key Strategy ────────────────────
+// Set GEMINI_API_KEY to a comma-separated list of keys in .env:
+//   GEMINI_API_KEY=key1,key2,key3
+// Uses key 1 until rate-limited, then switches to key 2.
+// When key 2 is also limited, checks if key 1 has recovered, and so on.
+// This maximizes each key's burst capacity on the free tier.
 
-// Circuit breaker: skip Gemini when rate-limited instead of wasting time
-let _rateLimitedUntil = 0;
+const API_KEYS = (env.GEMINI_API_KEY || "")
+  .split(",")
+  .map((k) => k.trim())
+  .filter(Boolean);
+
+// Per-key state: { genAI, model, rateLimitedUntil }
+const keyPool = API_KEYS.map((key, i) => ({
+  key,
+  index: i,
+  genAI: null,
+  model: null,
+  rateLimitedUntil: 0,
+}));
+
+// Track which key is currently active (primary-failover)
+let _activeKeyIndex = 0;
+
+function getAvailableSlot() {
+  if (keyPool.length === 0) return null;
+
+  const now = Date.now();
+
+  // 1. Try the active (primary) key first
+  const primary = keyPool[_activeKeyIndex];
+  if (now >= primary.rateLimitedUntil) {
+    // Lazy-init the model for this key
+    if (!primary.genAI) {
+      primary.genAI = new GoogleGenerativeAI(primary.key);
+      primary.model = primary.genAI.getGenerativeModel({ model: env.GEMINI_MODEL });
+      logger.info(`[Gemini API] Key #${primary.index + 1}/${keyPool.length} initialized (model: ${env.GEMINI_MODEL})`);
+    }
+    return primary;
+  }
+
+  // 2. Primary is rate-limited — find the next available key
+  for (let i = 1; i < keyPool.length; i++) {
+    const idx = (_activeKeyIndex + i) % keyPool.length;
+    const slot = keyPool[idx];
+    if (now >= slot.rateLimitedUntil) {
+      // Switch active key to this one
+      _activeKeyIndex = idx;
+      logger.info(`[Gemini API] Switched to key #${idx + 1}/${keyPool.length}`);
+
+      if (!slot.genAI) {
+        slot.genAI = new GoogleGenerativeAI(slot.key);
+        slot.model = slot.genAI.getGenerativeModel({ model: env.GEMINI_MODEL });
+        logger.info(`[Gemini API] Key #${idx + 1}/${keyPool.length} initialized (model: ${env.GEMINI_MODEL})`);
+      }
+      return slot;
+    }
+  }
+
+  // 3. All keys are rate-limited
+  return null;
+}
 
 function getModel() {
-  if (!env.GEMINI_API_KEY) return null;
-  if (!genAI) {
-    genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
-    model = genAI.getGenerativeModel({ model: env.GEMINI_MODEL });
-    logger.info(`[Gemini API] Initialized with model: ${env.GEMINI_MODEL}`);
-  }
-  return model;
+  const slot = getAvailableSlot();
+  return slot?.model ?? null;
 }
 
 /**
- * Returns true if the Gemini API is configured AND not currently rate-limited.
+ * Returns true if at least one Gemini API key is configured AND not rate-limited.
  */
 export function isGeminiAvailable() {
-  if (!env.GEMINI_API_KEY) return false;
-  if (Date.now() < _rateLimitedUntil) {
-    const secsLeft = Math.ceil((_rateLimitedUntil - Date.now()) / 1000);
-    logger.info(`[Gemini API] Circuit breaker OPEN — rate-limited for ${secsLeft}s more, using Ollama`);
+  if (keyPool.length === 0) return false;
+
+  const now = Date.now();
+  const available = keyPool.some((s) => now >= s.rateLimitedUntil);
+
+  if (!available) {
+    const earliest = Math.min(...keyPool.map((s) => s.rateLimitedUntil));
+    const secsLeft = Math.ceil((earliest - now) / 1000);
+    logger.info(`[Gemini API] All ${keyPool.length} key(s) rate-limited — cooldown ${secsLeft}s, using Ollama`);
     return false;
   }
   return true;
 }
 
 /**
+ * Mark a specific key as rate-limited.
+ */
+function markKeyRateLimited(slot, cooldownSecs) {
+  slot.rateLimitedUntil = Date.now() + cooldownSecs * 1000;
+  const available = keyPool.filter((s) => Date.now() >= s.rateLimitedUntil).length;
+  logger.warn(
+    `[Gemini API] Key #${slot.index + 1} rate-limited for ${cooldownSecs}s — ${available}/${keyPool.length} keys available`
+  );
+}
+
+/**
  * Generate a structured JSON response from Gemini API.
  */
 async function generateGeminiResponse({ systemInstruction, prompt }) {
-  const geminiModel = getModel();
-  if (!geminiModel) {
-    throw new Error("Gemini API key not configured");
-  }
-
-  // Double-check circuit breaker right before calling
-  if (Date.now() < _rateLimitedUntil) {
-    throw new Error("Gemini API rate-limited (circuit breaker open)");
+  const slot = getAvailableSlot();
+  if (!slot) {
+    throw new Error("Gemini API — all keys rate-limited (circuit breaker open)");
   }
 
   try {
-    logger.info(`[Gemini API] Generating response...`);
+    logger.info(`[Gemini API] Request via key #${slot.index + 1}/${keyPool.length}`);
 
-    const result = await geminiModel.generateContent({
+    const result = await slot.model.generateContent({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       systemInstruction: { parts: [{ text: systemInstruction }] },
       generationConfig: {
@@ -63,7 +126,7 @@ async function generateGeminiResponse({ systemInstruction, prompt }) {
       throw new Error("Empty response from Gemini API");
     }
 
-    logger.info(`[Gemini API] Received response (${text.length} chars)`);
+    logger.info(`[Gemini API] Response OK (${text.length} chars, key #${slot.index + 1})`);
 
     try {
       return JSON.parse(text);
@@ -76,13 +139,11 @@ async function generateGeminiResponse({ systemInstruction, prompt }) {
       throw new Error("Failed to parse Gemini API JSON response");
     }
   } catch (err) {
-    // Detect 429 rate limit and activate circuit breaker
+    // Detect 429 rate limit and mark THIS specific key
     if (err.message?.includes("429") || err.message?.includes("Too Many Requests") || err.message?.includes("quota")) {
-      // Extract retry delay from error if available, default to 60s
       const retryMatch = err.message.match(/retry in (\d+)/i);
       const cooldownSecs = retryMatch ? Math.max(parseInt(retryMatch[1], 10), 30) : 60;
-      _rateLimitedUntil = Date.now() + cooldownSecs * 1000;
-      logger.warn(`[Gemini API] Rate limited! Circuit breaker CLOSED for ${cooldownSecs}s — falling back to Ollama`);
+      markKeyRateLimited(slot, cooldownSecs);
     }
     logger.error("[Gemini API] Error:", err.message?.slice(0, 200));
     throw err;
@@ -217,27 +278,151 @@ Return JSON:
 }
 
 /**
- * Resume parsing using Gemini API.
+ * Deep resume parsing using Gemini API.
+ * Extracts full structured profile: work history, education, certs, projects, keywords, seniority.
  */
 export async function geminiApiParseResume({ text }) {
-  const systemInstruction = `You are an expert resume parser. Extract structured data from resume text.
+  const systemInstruction = `You are an expert resume parser with 10+ years of HR technology experience.
+You extract deeply structured data from resume text with high accuracy.
+Extract ALL available information — do not skip sections. If a field is not found, use empty string or empty array.
 Output strictly valid JSON.`;
 
-  const prompt = `Parse this resume and extract key information.
+  const prompt = `Parse this resume thoroughly and extract ALL structured information.
 
 Return JSON:
 {
-  "name": "Full name",
-  "summary": "1-2 sentence professional summary",
-  "skills": ["skill1", "skill2", ...max 15 technical skills],
-  "email": "email if found",
-  "phone": "phone if found"
+  "name": "Full legal name",
+  "email": "email address if found",
+  "phone": "phone number if found",
+  "location": "City, State/Country if found",
+  "links": ["LinkedIn URL", "GitHub URL", "portfolio URL", "any other professional links"],
+  "summary": "2-3 sentence professional summary synthesized from the resume",
+  "skills": ["up to 20 technical and professional skills found"],
+  "experience": [
+    {
+      "title": "Job Title",
+      "company": "Company Name",
+      "location": "City/Remote",
+      "startDate": "YYYY-MM or YYYY",
+      "endDate": "YYYY-MM or Present",
+      "highlights": ["quantified achievement 1", "key responsibility 2"]
+    }
+  ],
+  "education": [
+    {
+      "degree": "Degree and Field (e.g., B.Tech Computer Science)",
+      "institution": "University/College Name",
+      "graduationYear": 2022,
+      "gpa": "GPA/CGPA if mentioned (e.g., 8.5/10)"
+    }
+  ],
+  "certifications": ["AWS Solutions Architect", "Google Cloud Professional", "etc."],
+  "projects": [
+    {
+      "name": "Project Name",
+      "description": "1-2 sentence description",
+      "technologies": ["React", "Node.js"],
+      "impact": "quantified impact if mentioned"
+    }
+  ],
+  "keywords": ["domain-specific terms like microservices, agile, CI/CD, system design, etc."],
+  "totalYearsExperience": 3,
+  "seniorityLevel": "Junior | Mid-Level | Senior | Lead | Principal"
 }
 
-Resume Text:
-${text.slice(0, 4000)}`;
+Rules:
+- Extract EVERY job entry, education entry, certification, and project mentioned
+- For experience highlights, prefer quantified achievements (numbers, percentages, metrics)
+- For skills, include both technical skills (languages, frameworks, tools) and professional skills (leadership, communication)
+- For keywords, extract industry buzzwords and domain terms NOT already in skills
+- Calculate totalYearsExperience from the work history dates
+- Determine seniorityLevel from job titles and experience duration
 
-  return generateGeminiResponse({ systemInstruction, prompt });
+Resume Text:
+${text.slice(0, 6000)}`;
+
+  // Use higher token limit for deep extraction
+  const slot = getAvailableSlot();
+  if (!slot) {
+    throw new Error("Gemini API — all keys rate-limited (circuit breaker open)");
+  }
+
+  try {
+    logger.info(`[Gemini API] Deep resume parsing via key #${slot.index + 1}/${keyPool.length}...`);
+
+    const result = await slot.model.generateContent({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      systemInstruction: { parts: [{ text: systemInstruction }] },
+      generationConfig: {
+        responseMimeType: "application/json",
+        temperature: 0.1,
+        maxOutputTokens: 2048,
+      },
+    });
+
+    const responseText = result.response.text();
+    if (!responseText) {
+      throw new Error("Empty response from Gemini API");
+    }
+
+    logger.info(`[Gemini API] Deep parse received (${responseText.length} chars, key #${slot.index + 1})`);
+
+    let parsed;
+    try {
+      parsed = JSON.parse(responseText);
+    } catch {
+      logger.warn("[Gemini API] JSON parse failed, attempting regex extraction");
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        parsed = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error("Failed to parse Gemini API JSON response");
+      }
+    }
+
+    // Normalize and validate the deep-parsed result
+    return {
+      name: parsed.name || "",
+      email: parsed.email || "",
+      phone: parsed.phone || "",
+      location: parsed.location || "",
+      links: Array.isArray(parsed.links) ? parsed.links.filter(Boolean) : [],
+      summary: parsed.summary || "",
+      skills: Array.isArray(parsed.skills) ? parsed.skills.filter(Boolean).slice(0, 20) : [],
+      experience: Array.isArray(parsed.experience) ? parsed.experience.map(exp => ({
+        title: exp.title || "",
+        company: exp.company || "",
+        location: exp.location || "",
+        startDate: exp.startDate || "",
+        endDate: exp.endDate || "",
+        highlights: Array.isArray(exp.highlights) ? exp.highlights : [],
+      })) : [],
+      education: Array.isArray(parsed.education) ? parsed.education.map(edu => ({
+        degree: edu.degree || "",
+        institution: edu.institution || "",
+        graduationYear: edu.graduationYear || null,
+        gpa: edu.gpa || "",
+      })) : [],
+      certifications: Array.isArray(parsed.certifications) ? parsed.certifications.filter(Boolean) : [],
+      projects: Array.isArray(parsed.projects) ? parsed.projects.map(proj => ({
+        name: proj.name || "",
+        description: proj.description || "",
+        technologies: Array.isArray(proj.technologies) ? proj.technologies : [],
+        impact: proj.impact || "",
+      })) : [],
+      keywords: Array.isArray(parsed.keywords) ? parsed.keywords.filter(Boolean) : [],
+      totalYearsExperience: typeof parsed.totalYearsExperience === "number" ? parsed.totalYearsExperience : 0,
+      seniorityLevel: parsed.seniorityLevel || "Mid-Level",
+    };
+  } catch (err) {
+    if (err.message?.includes("429") || err.message?.includes("Too Many Requests") || err.message?.includes("quota")) {
+      const retryMatch = err.message.match(/retry in (\d+)/i);
+      const cooldownSecs = retryMatch ? Math.max(parseInt(retryMatch[1], 10), 30) : 60;
+      markKeyRateLimited(slot, cooldownSecs);
+    }
+    logger.error("[Gemini API] Deep parse error:", err.message?.slice(0, 200));
+    throw err;
+  }
 }
 
 /**

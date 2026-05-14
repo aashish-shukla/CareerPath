@@ -2,9 +2,11 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
+import cookieParser from "cookie-parser";
 import rateLimit from "express-rate-limit";
 
 import { env } from "./config/env.js";
+import { requestId } from "./middleware/requestId.js";
 import { notFoundHandler } from "./middleware/notFoundHandler.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { authRoutes } from "./routes/auth.routes.js";
@@ -22,6 +24,7 @@ export function createApp() {
   const app = express();
 
   app.set("trust proxy", 1);
+  app.use(requestId);
   app.use(helmet());
   app.use(
     cors({
@@ -29,6 +32,7 @@ export function createApp() {
       credentials: true,
     })
   );
+  app.use(cookieParser());
   app.use(express.json({ limit: "2mb" }));
   app.use(express.urlencoded({ extended: true }));
   app.use(morgan(env.NODE_ENV === "production" ? "combined" : "dev"));
