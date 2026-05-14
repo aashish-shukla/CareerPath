@@ -26,12 +26,29 @@ export function createApp() {
   app.set("trust proxy", 1);
   app.use(requestId);
   app.use(helmet());
+
+  // CORS: support multiple origins (comma-separated in FRONTEND_ORIGIN)
+  const allowedOrigins = (env.FRONTEND_ORIGIN || "")
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
+  // Always allow localhost for dev
+  if (!allowedOrigins.includes("http://localhost:5173")) {
+    allowedOrigins.push("http://localhost:5173");
+  }
+
   app.use(
     cors({
-      origin: env.FRONTEND_ORIGIN,
+      origin: (origin, cb) => {
+        // Allow requests with no origin (mobile, curl, server-to-server)
+        if (!origin) return cb(null, true);
+        if (allowedOrigins.includes(origin)) return cb(null, true);
+        cb(new Error(`CORS: origin ${origin} not allowed`));
+      },
       credentials: true,
     })
   );
+
   app.use(cookieParser());
   app.use(express.json({ limit: "2mb" }));
   app.use(express.urlencoded({ extended: true }));
